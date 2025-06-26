@@ -3,118 +3,210 @@ import email
 import smtplib
 from email.mime.text import MIMEText
 from google.generativeai import GenerativeModel, configure
+import time
+import html
 
-print("Initializing AI email assistant...\n")
+# === Pretty Terminal Colors ===
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    RESET = '\033[0m'
 
-# --- User Authentication ---
-email_user = input("Enter your Gmail address: ")
-email_pass = input("Enter your Gmail app password: ")
-API_KEY = input("Enter your Gemini API key: ")
+def print_header(text):
+    print(f"{Colors.HEADER}{Colors.BOLD}=== {text} ==={Colors.RESET}")
 
-configure(api_key=API_KEY)
+def print_info(text):
+    print(f"{Colors.CYAN}[INFO]{Colors.RESET} {text}")
 
-# --- Connect to Gmail ---
-print("Connecting to Gmail and scanning inbox...")
-try:
-    imap = imaplib.IMAP4_SSL("imap.gmail.com")
-    imap.login(email_user, email_pass)
-except imaplib.IMAP4.error:
-    print("Login failed. Check your credentials and try again.")
-    exit()
+def print_success(text):
+    print(f"{Colors.GREEN}[SUCCESS]{Colors.RESET} {text}")
 
-imap.select("inbox")
+def print_warning(text):
+    print(f"{Colors.YELLOW}[WARNING]{Colors.RESET} {text}")
 
-status, messages = imap.search(None, "UNSEEN")
-if status != "OK":
-    print("Failed to search inbox.")
-    imap.logout()
-    exit()
+def print_error(text):
+    print(f"{Colors.RED}[ERROR]{Colors.RESET} {text}")
 
-email_nums = messages[0].split()
+# === HTML Template ===
+def create_html_body(original_body, ai_response):
+    def safe_html(text):
+        return html.escape(text).replace('\n', '<br>')
+    return f"""
+<html>
+<head>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            background-color: #f9f9f9;
+            margin: 0; padding: 20px;
+        }}
+        .container {{
+            max-width: 700px;
+            margin: auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            border: 1px solid #ddd;
+        }}
+        h2 {{
+            color: #333;
+            font-size: 20px;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 8px;
+        }}
+        p {{
+            font-size: 15px;
+            color: #555;
+            line-height: 1.5;
+        }}
+        .response-box {{
+            background-color: #f0f4ff;
+            border: 1px solid #b3c7ff;
+            padding: 15px;
+            border-radius: 6px;
+            color: #222;
+            font-size: 15px;
+            white-space: pre-wrap;
+            margin-top: 10px;
+        }}
+        .footer {{
+            margin-top: 30px;
+            font-size: 13px;
+            color: #888;
+            text-align: center;
+            font-style: italic;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>You asked:</h2>
+        <p>{safe_html(original_body)}</p>
+        <h2>AI Response:</h2>
+        <div class="response-box">{safe_html(ai_response)}</div>
+        <div class="footer">AI Assistant • ao1codes</div>
+    </div>
+</body>
+</html>
+"""
 
-if not email_nums:
-    print("No unread emails. Assistant is on standby.")
-    imap.logout()
-    exit()
-else:
-    print(f"Detected {len(email_nums)} unread email(s). Generating replies...\n")
+def main():
+    print_header("ao1codes Email Bot Booting Up")
 
-model = GenerativeModel("gemini-1.5-flash")
+    email_user = input("Enter your Gmail address: ")
+    email_pass = input("Enter your Gmail app password: ")
+    api_key = input("Enter your Gemini API key: ")
+    configure(api_key=api_key)
 
-for num in email_nums:
-    status, data = imap.fetch(num, "(RFC822)")
-    if status != "OK":
-        print(f"Failed to retrieve email #{num.decode()}. Skipping.")
-        continue
-
-    msg = email.message_from_bytes(data[0][1])
-
-    # Get sender info (name and email)
-    sender_name, sender_email = email.utils.parseaddr(msg.get("From", ""))
-    if not sender_name:
-        sender_name = sender_email
-
-    subject = msg.get("Subject")
-    if not subject:
-        subject = "Your message"
-
-    # --- Extract plain text body ---
-    body = ""
-    if msg.is_multipart():
-        for part in msg.walk():
-            content_type = part.get_content_type()
-            content_dispo = str(part.get("Content-Disposition", ""))
-            if content_type == "text/plain" and "attachment" not in content_dispo:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    body = payload.decode(errors="ignore")
-                    break
-    else:
-        payload = msg.get_payload(decode=True)
-        if payload:
-            body = payload.decode(errors="ignore")
-
-    # --- Check for image attachments ---
-    has_image = any(part.get_content_type().startswith("image/") for part in msg.walk())
-    if has_image:
-        print(f"Email from {sender_email} includes an image attachment. (AI currently does not process images.)")
-
-    print(f"Replying to {sender_email} | Subject: \"{subject}\"")
-
-    # --- AI-generated reply ---
-    prompt = f"Write a professional and polite reply to this email:\n\n{body.strip()}"
+    print_info("Connecting to Gmail IMAP...")
     try:
-        response = model.generate_content(prompt).text.strip()
+        imap = imaplib.IMAP4_SSL("imap.gmail.com")
+        imap.login(email_user, email_pass)
+        print_success("Logged in to Gmail!")
     except Exception as e:
-        print(f"AI error while generating response: {e}")
-        response = "Apologies, I'm currently unable to respond properly."
+        print_error(f"Login failed: {e}")
+        return
 
-    reply_body = (
-        f"Hello,\n\n"
-        f"Dear {sender_name},\n\n"
-        f"This email confirms that I have received and processed your message. "
-        f"My system is functioning correctly and I am able to respond to your inquiries automatically.\n\n"
-        f"Thank you for your test email. Please let me know if you have any further questions.\n\n"
-        f"Sincerely,\n\n"
-        f"AI Assistant\n\n"
-        f"Best regards,\n"
-        f"mailmind.v01"
-    )
+    model = GenerativeModel("gemini-1.5-flash")
 
-    reply_msg = MIMEText(reply_body)
-    reply_msg["Subject"] = "Re: " + subject
-    reply_msg["From"] = email_user
-    reply_msg["To"] = sender_email
+    print_info("Watching inbox every 10 seconds for new emails...\nCtrl+C to stop.")
 
-    # --- Send AI-generated email ---
     try:
-        with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
-            smtp.starttls()
-            smtp.login(email_user, email_pass)
-            smtp.send_message(reply_msg)
-        print(f"Replied to {sender_email} successfully.\n")
-    except Exception as e:
-        print(f"Failed to send reply to {sender_email}: {e}")
+        while True:
+            try:
+                imap.select("inbox")
+                status, messages = imap.search(None, "UNSEEN")
+                if status != "OK":
+                    print_error("Search failed.")
+                    time.sleep(10)
+                    continue
+            except Exception as e:
+                print_error(f"Reconnecting IMAP: {e}")
+                time.sleep(5)
+                try:
+                    imap.logout()
+                except:
+                    pass
+                imap = imaplib.IMAP4_SSL("imap.gmail.com")
+                imap.login(email_user, email_pass)
+                continue
 
-imap.logout()
-print("All done. Assistant is idle.")
+            email_nums = messages[0].split()
+            if not email_nums:
+                print_info("No new emails. Snoozing...")
+            else:
+                print_success(f"Found {len(email_nums)} new email(s)!")
+
+            for num in email_nums:
+                status, data = imap.fetch(num, "(RFC822)")
+                if status != "OK":
+                    print_warning(f"Failed to fetch #{num.decode()}")
+                    continue
+
+                msg = email.message_from_bytes(data[0][1])
+                sender_name, sender_email = email.utils.parseaddr(msg.get("From", ""))
+                if not sender_name:
+                    sender_name = sender_email
+
+                subject = msg.get("Subject") or "Your message"
+
+                # Extract plain body
+                body = ""
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/plain" and "attachment" not in str(part.get("Content-Disposition", "")):
+                            payload = part.get_payload(decode=True)
+                            if payload:
+                                body = payload.decode(errors="ignore")
+                                break
+                else:
+                    payload = msg.get_payload(decode=True)
+                    if payload:
+                        body = payload.decode(errors="ignore")
+
+                prompt = body.strip()
+                first_line = prompt.splitlines()[0].strip()
+                reply_subject = first_line if first_line else "Re: Your question"
+
+                print_info(f"Generating AI response for: {first_line[:60]}...")
+                try:
+                    response = model.generate_content(prompt).text.strip()
+                    print_success("Got response!")
+                except Exception as e:
+                    print_error(f"AI fail: {e}")
+                    response = "Oops, something went wrong while generating the response."
+
+                html_body = create_html_body(prompt, response)
+
+                reply_msg = MIMEText(html_body, "html")
+                reply_msg["Subject"] = reply_subject
+                reply_msg["From"] = email_user
+                reply_msg["To"] = sender_email
+
+                try:
+                    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+                        smtp.starttls()
+                        smtp.login(email_user, email_pass)
+                        smtp.send_message(reply_msg)
+                    print_success(f"Replied to {sender_email}")
+                    imap.store(num, '+FLAGS', '\\Seen')
+                except Exception as e:
+                    print_error(f"Reply failed: {e}")
+
+                time.sleep(1)
+
+            time.sleep(10)
+
+    except KeyboardInterrupt:
+        print_info("Shutting down gracefully...")
+        imap.logout()
+        print_success("Logged out. Bye!")
+
+if __name__ == "__main__":
+    main()
