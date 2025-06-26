@@ -3,6 +3,8 @@ import email
 import smtplib
 from email.mime.text import MIMEText
 from google.generativeai import GenerativeModel, configure
+from dotenv import load_dotenv
+import os
 import time
 import html
 
@@ -17,71 +19,27 @@ class Colors:
     BOLD = '\033[1m'
     RESET = '\033[0m'
 
-def print_header(text):
-    print(f"{Colors.HEADER}{Colors.BOLD}=== {text} ==={Colors.RESET}")
+def print_header(text): print(f"{Colors.HEADER}{Colors.BOLD}=== {text} ==={Colors.RESET}")
+def print_info(text): print(f"{Colors.CYAN}[INFO]{Colors.RESET} {text}")
+def print_success(text): print(f"{Colors.GREEN}[SUCCESS]{Colors.RESET} {text}")
+def print_warning(text): print(f"{Colors.YELLOW}[WARNING]{Colors.RESET} {text}")
+def print_error(text): print(f"{Colors.RED}[ERROR]{Colors.RESET} {text}")
 
-def print_info(text):
-    print(f"{Colors.CYAN}[INFO]{Colors.RESET} {text}")
-
-def print_success(text):
-    print(f"{Colors.GREEN}[SUCCESS]{Colors.RESET} {text}")
-
-def print_warning(text):
-    print(f"{Colors.YELLOW}[WARNING]{Colors.RESET} {text}")
-
-def print_error(text):
-    print(f"{Colors.RED}[ERROR]{Colors.RESET} {text}")
-
-# === HTML Template ===
+# === HTML Response Builder ===
 def create_html_body(original_body, ai_response):
-    def safe_html(text):
-        return html.escape(text).replace('\n', '<br>')
+    def safe_html(text): return html.escape(text).replace('\n', '<br>')
     return f"""
 <html>
 <head>
     <style>
-        body {{
-            font-family: Arial, sans-serif;
-            background-color: #f9f9f9;
-            margin: 0; padding: 20px;
-        }}
-        .container {{
-            max-width: 700px;
-            margin: auto;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            border: 1px solid #ddd;
-        }}
-        h2 {{
-            color: #333;
-            font-size: 20px;
-            border-bottom: 2px solid #007bff;
-            padding-bottom: 8px;
-        }}
-        p {{
-            font-size: 15px;
-            color: #555;
-            line-height: 1.5;
-        }}
-        .response-box {{
-            background-color: #f0f4ff;
-            border: 1px solid #b3c7ff;
-            padding: 15px;
-            border-radius: 6px;
-            color: #222;
-            font-size: 15px;
-            white-space: pre-wrap;
-            margin-top: 10px;
-        }}
-        .footer {{
-            margin-top: 30px;
-            font-size: 13px;
-            color: #888;
-            text-align: center;
-            font-style: italic;
-        }}
+        body {{ font-family: Arial, sans-serif; background-color: #f9f9f9; margin: 0; padding: 20px; }}
+        .container {{ max-width: 700px; margin: auto; background: white; padding: 20px;
+            border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border: 1px solid #ddd; }}
+        h2 {{ color: #333; font-size: 20px; border-bottom: 2px solid #007bff; padding-bottom: 8px; }}
+        p {{ font-size: 15px; color: #555; line-height: 1.5; }}
+        .response-box {{ background-color: #f0f4ff; border: 1px solid #b3c7ff; padding: 15px;
+            border-radius: 6px; color: #222; font-size: 15px; white-space: pre-wrap; margin-top: 10px; }}
+        .footer {{ margin-top: 30px; font-size: 13px; color: #888; text-align: center; font-style: italic; }}
     </style>
 </head>
 <body>
@@ -99,9 +57,11 @@ def create_html_body(original_body, ai_response):
 def main():
     print_header("ao1codes Email Bot Booting Up")
 
-    email_user = input("Enter your Gmail address: ")
-    email_pass = input("Enter your Gmail app password: ")
-    api_key = input("Enter your Gemini API key: ")
+    # Load credentials from .env file
+    load_dotenv()
+    email_user = os.getenv("EMAIL_ADDRESS")
+    email_pass = os.getenv("EMAIL_PASSWORD")
+    api_key = os.getenv("GEMINI_API_KEY")
     configure(api_key=api_key)
 
     print_info("Connecting to Gmail IMAP...")
@@ -114,8 +74,7 @@ def main():
         return
 
     model = GenerativeModel("gemini-1.5-flash")
-
-    print_info("Watching inbox every 10 seconds for new emails...\nCtrl+C to stop.")
+    print_info("Watching inbox every 10 seconds...\nCtrl+C to stop.")
 
     try:
         while True:
@@ -129,10 +88,8 @@ def main():
             except Exception as e:
                 print_error(f"Reconnecting IMAP: {e}")
                 time.sleep(5)
-                try:
-                    imap.logout()
-                except:
-                    pass
+                try: imap.logout()
+                except: pass
                 imap = imaplib.IMAP4_SSL("imap.gmail.com")
                 imap.login(email_user, email_pass)
                 continue
@@ -151,36 +108,41 @@ def main():
 
                 msg = email.message_from_bytes(data[0][1])
                 sender_name, sender_email = email.utils.parseaddr(msg.get("From", ""))
-                if not sender_name:
-                    sender_name = sender_email
-
                 subject = msg.get("Subject") or "Your message"
 
-                # Extract plain body
-                body = ""
+                # === Extract plain body
+                body, has_attachment = "", False
                 if msg.is_multipart():
                     for part in msg.walk():
-                        if part.get_content_type() == "text/plain" and "attachment" not in str(part.get("Content-Disposition", "")):
+                        content_type = part.get_content_type()
+                        content_disp = str(part.get("Content-Disposition", ""))
+                        if content_type.startswith("image/") or "attachment" in content_disp:
+                            has_attachment = True
+                        elif content_type == "text/plain" and "attachment" not in content_disp:
                             payload = part.get_payload(decode=True)
-                            if payload:
-                                body = payload.decode(errors="ignore")
-                                break
+                            if payload: body = payload.decode(errors="ignore")
                 else:
                     payload = msg.get_payload(decode=True)
-                    if payload:
-                        body = payload.decode(errors="ignore")
+                    if payload: body = payload.decode(errors="ignore")
 
                 prompt = body.strip()
-                first_line = prompt.splitlines()[0].strip()
+                if not prompt:
+                    prompt = "(No prompt provided)"
+                first_line = prompt.splitlines()[0].strip() if prompt.strip() else "Your message"
                 reply_subject = first_line if first_line else "Re: Your question"
 
-                print_info(f"Generating AI response for: {first_line[:60]}...")
-                try:
-                    response = model.generate_content(prompt).text.strip()
-                    print_success("Got response!")
-                except Exception as e:
-                    print_error(f"AI fail: {e}")
-                    response = "Oops, something went wrong while generating the response."
+                # === Message decision
+                if has_attachment:
+                    print_warning(f"{sender_email} sent an attachment. Skipping AI.")
+                    response = "Thanks for reaching out! We currently don’t process emails with attachments. Please resend your message without files."
+                else:
+                    print_info(f"Generating AI response for: {first_line[:60]}...")
+                    try:
+                        response = model.generate_content(prompt).text.strip()
+                        print_success("Got response!")
+                    except Exception as e:
+                        print_error(f"AI failed: {e}")
+                        response = "Sorry, I had trouble generating a response to your message. Please try again later."
 
                 html_body = create_html_body(prompt, response)
 
@@ -200,7 +162,6 @@ def main():
                     print_error(f"Reply failed: {e}")
 
                 time.sleep(1)
-
             time.sleep(10)
 
     except KeyboardInterrupt:
