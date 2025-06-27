@@ -22,8 +22,8 @@ ao1codes is an email-based AI responder. Just send an email to `ao1codes.ai@gmai
 
 1. Clone this repository  
    ```bash
-   git clone https://github.com/yourusername/ao1codes-email-ai.git
-   cd ao1codes-email-ai
+   git clone https://github.com/ao1codes/workhorse-lite
+   cd workhorse-lite
    ```
 
 2. Install dependencies  
