@@ -43,7 +43,7 @@ ao1codes is an email-based AI responder. Just send an email to `ao1codes.ai@gmai
 ## 🛠️ Running the Bot
 
 ```bash
-python workhorse.py
+python workhorse-lite.py
 ```
 
 The bot will start watching your Gmail inbox and reply to new, plain-text emails automatically.
