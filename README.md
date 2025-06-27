@@ -15,6 +15,7 @@ ao1codes is an email-based AI responder. Just send an email to `ao1codes.ai@gmai
 - 🔁 Self-reconnecting IMAP loop with delay handling
 - 🔐 Uses `.env` for secure credential loading
 - 💤 Sleep cycles to avoid Gmail rate limits
+- 🔄 Supports threaded email context for natural AI replies
 
 ---
 
