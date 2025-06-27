@@ -1,27 +1,75 @@
-# ao1codes Email AI Reply Bot
+# 📩 ao1codes Email AI
 
-A Python script that monitors a Gmail inbox, reads incoming emails, sends the email body to an AI language model (Google Gemini API), and replies with a smart, formatted AI-generated response — no login needed beyond email credentials.
+**Email an AI. Get smart replies. No login needed.**
 
----
-
-## Features
-
-- Connects securely to Gmail via IMAP to check new unread emails  
-- Reads plain text emails (ignores emails with attachments)  
-- Sends email content as prompt to Google Gemini AI model for response  
-- Sends back a nicely formatted HTML reply email with the AI's answer  
-- Runs continuously, checking inbox every 10 seconds  
-- Uses environment variables for credentials and API keys  
-- Pretty colored terminal logs for easy debugging  
+ao1codes is an email-based AI responder. Just send an email to `ao1codes.ai@gmail.com` and you'll get a clean, professional response powered by Google's Gemini AI — no web apps, no accounts, just email.
 
 ---
 
-## Requirements
+## ✨ Features
 
-- Python 3.7+  
-- Google Gemini API key  
-- Gmail account with app password (if 2FA enabled)  
-- `google-generativeai` Python package  
-- `python-dotenv` package  
+- 📥 Auto-checks Gmail inbox for new emails
+- 🤖 AI-generated responses using Gemini 1.5 Flash
+- 💬 Full HTML-formatted replies with original message included
+- 📷 Skips image/file attachments and responds accordingly
+- 🔁 Self-reconnecting IMAP loop with delay handling
+- 🔐 Uses `.env` for secure credential loading
+- 💤 Sleep cycles to avoid Gmail rate limits
 
 ---
+
+## 📦 Installation
+
+1. Clone this repository  
+   ```bash
+   git clone https://github.com/yourusername/ao1codes-email-ai.git
+   cd ao1codes-email-ai
+   ```
+
+2. Install dependencies  
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Create a `.env` file  
+   ```
+   EMAIL_ADDRESS=your_email@gmail.com
+   EMAIL_PASSWORD=your_app_password
+   GEMINI_API_KEY=your_gemini_api_key
+   ```
+
+---
+
+## 🛠️ Running the Bot
+
+```bash
+python workhorse.py
+```
+
+The bot will start watching your Gmail inbox and reply to new, plain-text emails automatically.
+
+---
+
+## 🚫 Limitations
+
+- Attachments are ignored — users are notified not to send files.
+- One email = one response. Threaded context is not stored (yet).
+- This is a personal-use tool; for large-scale deployment, consider API rate limits and auth security.
+
+---
+
+## 🌐 Live Demo
+
+Want to try it? Just email:
+
+```
+ao1codes.ai@gmail.com
+```
+
+No signup. No dashboard. Just email an AI and get a reply.
+
+---
+
+## 📄 License
+
+MIT License © 2025 ao1codes
