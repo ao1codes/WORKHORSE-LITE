@@ -2,7 +2,7 @@
 
 **Email an AI. Get smart replies. No login needed.**
 
-ao1codes is an email-based AI responder. Just send an email to `ao1codes.ai@gmail.com` and you'll get a clean, professional response powered by Google's Gemini AI — no web apps, no accounts, just email.
+MailMind is an email-based AI responder. Just send an email to `ao1codes.ai@gmail.com` and you'll get a clean, professional response powered by Google's Gemini AI — no web apps, no accounts, just email.
 
 ---
 
