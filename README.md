@@ -1,4 +1,4 @@
-# 📩 ao1codes Email AI
+# 📩 ao1codes' MailMind
 
 **Email an AI. Get smart replies. No login needed.**
 
