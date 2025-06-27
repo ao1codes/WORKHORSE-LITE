@@ -53,7 +53,6 @@ The bot will start watching your Gmail inbox and reply to new, plain-text emails
 ## 🚫 Limitations
 
 - Attachments are ignored — users are notified not to send files.
-- One email = one response. Threaded context is not stored (yet).
 - This is a personal-use tool; for large-scale deployment, consider API rate limits and auth security.
 
 ---
