@@ -68,7 +68,3 @@ ao1codes.ai@gmail.com
 No signup. No dashboard. Just email an AI and get a reply.
 
 ---
-
-## 📄 License
-
-MIT License © 2025 ao1codes
