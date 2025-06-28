@@ -8,6 +8,7 @@ import os
 import time
 import html
 import re
+import textwrap  # ✅ New import
 
 DEBUG = False
 
@@ -32,36 +33,30 @@ conversation_history = {}
 def is_likely_reply(subject, body, sender_email):
     subject_lower = subject.lower() if subject else ""
     has_explicit_reply_subject = subject_lower.startswith('re:')
-    
     body_lower = body.lower() if body else ""
     has_quoted_content = ('>' in body or 
                          'wrote:' in body_lower or 
                          'ai assistant' in body_lower or 
                          'ao1codes' in body_lower or
                          '<html>' in body_lower)
-    
     body_start = body.strip()[:50].lower()
     continuation_starters = ['and ', 'also ', 'what about', 'how about', 'additionally', 'furthermore']
     is_short_continuation = (len(body.strip()) < 100 and 
                            any(body_start.startswith(starter) for starter in continuation_starters))
-    
     references_previous = any(phrase in body_lower for phrase in [
         'you said', 'you mentioned', 'earlier you', 'previously', 'before you',
         'your previous', 'last time', 'you told me'
     ])
-    
     if DEBUG:
         print_info(f"Reply detection for {sender_email}:")
         print_info(f"  - Has explicit reply subject: {has_explicit_reply_subject}")
         print_info(f"  - Has quoted content: {has_quoted_content}")
         print_info(f"  - Is short continuation: {is_short_continuation}")
         print_info(f"  - References previous: {references_previous}")
-    
     is_reply = (has_explicit_reply_subject or 
                 has_quoted_content or 
                 is_short_continuation or 
                 references_previous)
-    
     if DEBUG:
         print_info(f"  - Final decision: {'REPLY' if is_reply else 'NEW CONVERSATION'}")
     return is_reply
@@ -69,45 +64,35 @@ def is_likely_reply(subject, body, sender_email):
 def extract_latest_message(body):
     lines = body.split('\n')
     latest_lines = []
-    
     for line in lines:
         stripped = line.strip()
-        
         if (stripped.startswith('>') or 
             'wrote:' in stripped.lower() or
             'original message' in stripped.lower() or
             'ai assistant' in stripped.lower() or
             '<html>' in stripped.lower()):
             break
-            
         if 'ao1codes' in stripped or 'ai assistant' in stripped:
             continue
-            
         latest_lines.append(line)
-    
     latest_message = '\n'.join(latest_lines).strip()
-    
     if not latest_message or len(latest_message) < 5:
         latest_message = body.strip()
-    
     return latest_message
 
 def update_conversation_history(sender_email, user_message, ai_response):
     if sender_email not in conversation_history:
         conversation_history[sender_email] = []
-    
     conversation_history[sender_email].append({
         'type': 'user',
         'message': user_message,
         'timestamp': time.time()
     })
-    
     conversation_history[sender_email].append({
         'type': 'ai',
         'message': ai_response,
         'timestamp': time.time()
     })
-    
     if len(conversation_history[sender_email]) > 20:
         conversation_history[sender_email] = conversation_history[sender_email][-20:]
 
@@ -120,30 +105,23 @@ def start_new_conversation(sender_email):
 def build_conversation_context(sender_email, current_message):
     if sender_email not in conversation_history or len(conversation_history[sender_email]) == 0:
         return current_message
-    
     context_parts = []
     history = conversation_history[sender_email]
-    
     recent_history = history[-6:] if len(history) > 6 else history
-    
     for entry in recent_history:
         if entry['type'] == 'user':
             context_parts.append(f"USER: {entry['message']}")
         else:
             context_parts.append(f"AI_ASSISTANT: {entry['message']}")
-    
     context_parts.append(f"USER: {current_message}")
-    
     return "\n\n".join(context_parts)
 
 def create_html_body(latest_message, ai_response, is_thread=False, thread_count=1):
     def safe_html(text): return html.escape(text).replace('\n', '<br>')
-    
     if is_thread and thread_count > 1:
         thread_info = f" • {thread_count} exchanges"
     else:
         thread_info = " • New conversation"
-    
     return f"""
 <html>
 <head>
@@ -156,10 +134,6 @@ def create_html_body(latest_message, ai_response, is_thread=False, thread_count=
         .response-box {{ background-color: #f0f4ff; border: 1px solid #b3c7ff; padding: 15px;
             border-radius: 6px; color: #222; font-size: 15px; white-space: pre-wrap; margin-top: 10px; }}
         .footer {{ margin-top: 30px; font-size: 13px; color: #888; text-align: center; font-style: italic; }}
-        .thread-badge {{ background-color: #28a745; color: white; padding: 2px 8px; border-radius: 12px; 
-            font-size: 11px; font-weight: bold; margin-left: 10px; }}
-        .new-badge {{ background-color: #007bff; color: white; padding: 2px 8px; border-radius: 12px; 
-            font-size: 11px; font-weight: bold; margin-left: 10px; }}
     </style>
 </head>
 <body>
@@ -176,7 +150,6 @@ def create_html_body(latest_message, ai_response, is_thread=False, thread_count=
 
 def main():
     print_header("ao1codes Email Bot Booting Up")
-
     load_dotenv()
     email_user = os.getenv("EMAIL_ADDRESS")
     email_pass = os.getenv("EMAIL_PASSWORD")
@@ -246,23 +219,24 @@ def main():
 
                 is_thread = is_likely_reply(subject, body, sender_email)
                 latest_message = extract_latest_message(body)
-                
+
                 if is_thread:
                     thread_count = len(conversation_history.get(sender_email, [])) // 2 + 1
                     print_info(f"📧 Continuing conversation (Exchange #{thread_count})")
                     conversation_context = build_conversation_context(sender_email, latest_message)
-                    prompt_for_ai = f"""You are an AI email assistant continuing an ongoing conversation.
+                    prompt_for_ai = textwrap.dedent(f"""\
+                        You are an AI email assistant continuing an ongoing conversation.
 
-CONVERSATION HISTORY:
-{conversation_context}
+                        CONVERSATION HISTORY:
+                        {conversation_context}
 
-INSTRUCTIONS:
-- This is a continuation of our conversation
-- Reference previous context when relevant
-- Be natural and conversational
-- Remember what we discussed before
+                        INSTRUCTIONS:
+                        - This is a continuation of our conversation
+                        - Reference previous context when relevant
+                        - Be natural and conversational
+                        - Remember what we discussed before
 
-Please respond to the user's latest message:"""
+                        Please respond to the user's latest message:""")
                 else:
                     start_new_conversation(sender_email)
                     thread_count = 1
