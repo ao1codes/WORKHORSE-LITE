@@ -215,7 +215,8 @@ def main():
 
             email_nums = messages[0].split()
             if not email_nums:
-                print_info("No new emails. Snoozing...")
+                if DEBUG:
+                    print_info("No new emails. Snoozing...")
             else:
                 print_success(f"Found {len(email_nums)} new email(s)!")
 
