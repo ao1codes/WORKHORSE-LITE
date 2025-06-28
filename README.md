@@ -35,7 +35,7 @@ MailMind is an email-based AI responder. Just send an email to `ao1codes.ai@gmai
    ```
    EMAIL_ADDRESS=your_email@gmail.com
    EMAIL_PASSWORD=your_app_password
-   GEMINI_API_KEY=your_gemini_api_key
+   GEMINI_API_KEYS=your_gemini_api_keys
    ```
 
 ---
