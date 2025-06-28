@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 import os
 import time
 import html
-import re
-import textwrap  # ✅ New import
+import random
+import textwrap
 
 DEBUG = False
 
@@ -28,133 +28,239 @@ def print_success(text): print(f"{Colors.GREEN}[SUCCESS]{Colors.RESET} {text}")
 def print_warning(text): print(f"{Colors.YELLOW}[WARNING]{Colors.RESET} {text}")
 def print_error(text): print(f"{Colors.RED}[ERROR]{Colors.RESET} {text}")
 
+# Store conversation history and email counts per user
 conversation_history = {}
+user_email_counts = {}
 
-def is_likely_reply(subject, body, sender_email):
-    subject_lower = subject.lower() if subject else ""
-    has_explicit_reply_subject = subject_lower.startswith('re:')
-    body_lower = body.lower() if body else ""
-    has_quoted_content = ('>' in body or 
-                         'wrote:' in body_lower or 
-                         'ai assistant' in body_lower or 
-                         'ao1codes' in body_lower or
-                         '<html>' in body_lower)
-    body_start = body.strip()[:50].lower()
-    continuation_starters = ['and ', 'also ', 'what about', 'how about', 'additionally', 'furthermore']
-    is_short_continuation = (len(body.strip()) < 100 and 
-                           any(body_start.startswith(starter) for starter in continuation_starters))
-    references_previous = any(phrase in body_lower for phrase in [
-        'you said', 'you mentioned', 'earlier you', 'previously', 'before you',
-        'your previous', 'last time', 'you told me'
-    ])
-    if DEBUG:
-        print_info(f"Reply detection for {sender_email}:")
-        print_info(f"  - Has explicit reply subject: {has_explicit_reply_subject}")
-        print_info(f"  - Has quoted content: {has_quoted_content}")
-        print_info(f"  - Is short continuation: {is_short_continuation}")
-        print_info(f"  - References previous: {references_previous}")
-    is_reply = (has_explicit_reply_subject or 
-                has_quoted_content or 
-                is_short_continuation or 
-                references_previous)
-    if DEBUG:
-        print_info(f"  - Final decision: {'REPLY' if is_reply else 'NEW CONVERSATION'}")
-    return is_reply
+def search_all_emails_from_sender(imap, sender_email):
+    """Search through ALL emails (sent and received) to build complete conversation history"""
+    all_messages = []
+    
+    # Search in INBOX for emails FROM the sender
+    try:
+        imap.select("inbox")
+        status, inbox_messages = imap.search(None, f'FROM "{sender_email}"')
+        if status == "OK" and inbox_messages[0]:
+            inbox_nums = inbox_messages[0].split()
+            if DEBUG:
+                print_info(f"Found {len(inbox_nums)} emails in INBOX from {sender_email}")
+            
+            for num in inbox_nums:
+                try:
+                    status, data = imap.fetch(num, "(RFC822)")
+                    if status == "OK":
+                        msg = email.message_from_bytes(data[0][1])
+                        body = extract_email_body(msg)
+                        clean_msg = extract_clean_message(body)
+                        if clean_msg.strip():
+                            all_messages.append({
+                                'type': 'user',
+                                'message': clean_msg,
+                                'date': msg.get('Date', ''),
+                                'subject': msg.get('Subject', '')
+                            })
+                except:
+                    continue
+    except Exception as e:
+        print_warning(f"Error searching inbox: {e}")
+    
+    # Search in SENT folder for emails TO the sender (our replies)
+    try:
+        # Try different sent folder names
+        sent_folders = ['"[Gmail]/Sent Mail"', 'INBOX.Sent', 'Sent', '"Sent Messages"']
+        for folder in sent_folders:
+            try:
+                imap.select(folder)
+                status, sent_messages = imap.search(None, f'TO "{sender_email}"')
+                if status == "OK" and sent_messages[0]:
+                    sent_nums = sent_messages[0].split()
+                    if DEBUG:
+                        print_info(f"Found {len(sent_nums)} emails in {folder} to {sender_email}")
+                    
+                    for num in sent_nums:
+                        try:
+                            status, data = imap.fetch(num, "(RFC822)")
+                            if status == "OK":
+                                msg = email.message_from_bytes(data[0][1])
+                                body = extract_email_body(msg)
+                                # Skip if it's an AI response (contains our signature)
+                                if 'ao1codes' not in body.lower() and 'ai assistant' not in body.lower():
+                                    clean_msg = extract_clean_message(body)
+                                    if clean_msg.strip():
+                                        all_messages.append({
+                                            'type': 'ai',
+                                            'message': clean_msg,
+                                            'date': msg.get('Date', ''),
+                                            'subject': msg.get('Subject', '')
+                                        })
+                        except:
+                            continue
+                    break  # Found sent folder, no need to try others
+            except:
+                continue
+    except Exception as e:
+        print_warning(f"Error searching sent folders: {e}")
+    
+    # Sort by date (rough sorting by date string)
+    all_messages.sort(key=lambda x: x['date'])
+    
+    return all_messages
 
-def extract_latest_message(body):
+def extract_email_body(msg):
+    """Extract body text from email message"""
+    body = ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            cdisp = str(part.get("Content-Disposition", ""))
+            if ctype == "text/plain" and "attachment" not in cdisp:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    body = payload.decode(errors="ignore")
+                    break
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            body = payload.decode(errors="ignore")
+    return body
+
+def build_conversation_from_email_history(sender_email, imap):
+    """Build conversation history by searching through all emails from this sender"""
+    if DEBUG:
+        print_info(f"Building conversation history for {sender_email}...")
+    
+    all_messages = search_all_emails_from_sender(imap, sender_email)
+    
+    if not all_messages:
+        print_info("No previous emails found")
+        return 1  # First email
+    
+    # Count user emails (not AI responses)
+    user_email_count = len([msg for msg in all_messages if msg['type'] == 'user'])
+    
+    # Store in conversation history (last 20 messages to keep manageable)
+    conversation_history[sender_email] = all_messages[-20:]
+    user_email_counts[sender_email] = user_email_count
+    
+    if DEBUG:
+        print_success(f"Found {user_email_count} previous emails from {sender_email}")
+        print_success(f"Loaded {len(conversation_history[sender_email])} messages into context")
+    
+    return user_email_count  # Next email number
+
+def extract_clean_message(body):
+    """Extract the main message content, removing quoted text and signatures"""
     lines = body.split('\n')
-    latest_lines = []
+    clean_lines = []
+    
     for line in lines:
         stripped = line.strip()
+        # Skip quoted content, signatures, and HTML
         if (stripped.startswith('>') or 
             'wrote:' in stripped.lower() or
             'original message' in stripped.lower() or
             'ai assistant' in stripped.lower() or
-            '<html>' in stripped.lower()):
+            'ao1codes' in stripped.lower() or
+            '<html>' in stripped.lower() or
+            stripped.startswith('--') or  # Common signature delimiter
+            'sent from my' in stripped.lower()):
             break
-        if 'ao1codes' in stripped or 'ai assistant' in stripped:
-            continue
-        latest_lines.append(line)
-    latest_message = '\n'.join(latest_lines).strip()
-    if not latest_message or len(latest_message) < 5:
-        latest_message = body.strip()
-    return latest_message
+        clean_lines.append(line)
+    
+    clean_message = '\n'.join(clean_lines).strip()
+    return clean_message if clean_message else body.strip()
 
 def update_conversation_history(sender_email, user_message, ai_response):
+    """Add to conversation history and increment email count"""
     if sender_email not in conversation_history:
         conversation_history[sender_email] = []
+    if sender_email not in user_email_counts:
+        user_email_counts[sender_email] = 0
+    
+    # Increment email count for this user
+    user_email_counts[sender_email] += 1
+    
+    # Add to conversation history
     conversation_history[sender_email].append({
-        'type': 'user',
-        'message': user_message,
-        'timestamp': time.time()
+        'type': 'user', 
+        'message': user_message, 
+        'date': time.strftime('%a, %d %b %Y %H:%M:%S'),
+        'email_number': user_email_counts[sender_email]
     })
     conversation_history[sender_email].append({
-        'type': 'ai',
-        'message': ai_response,
-        'timestamp': time.time()
+        'type': 'ai', 
+        'message': ai_response, 
+        'date': time.strftime('%a, %d %b %Y %H:%M:%S')
     })
-    if len(conversation_history[sender_email]) > 20:
-        conversation_history[sender_email] = conversation_history[sender_email][-20:]
-
-def start_new_conversation(sender_email):
-    if sender_email in conversation_history:
-        del conversation_history[sender_email]
-    if DEBUG:
-        print_info(f"Started new conversation thread for {sender_email}")
+    
+    # Keep last 30 messages (15 exchanges) to manage memory
+    if len(conversation_history[sender_email]) > 30:
+        conversation_history[sender_email] = conversation_history[sender_email][-30:]
 
 def build_conversation_context(sender_email, current_message):
-    if sender_email not in conversation_history or len(conversation_history[sender_email]) == 0:
+    """Build full conversation context for the AI"""
+    if sender_email not in conversation_history or not conversation_history[sender_email]:
         return current_message
+    
     context_parts = []
-    history = conversation_history[sender_email]
-    recent_history = history[-6:] if len(history) > 6 else history
-    for entry in recent_history:
-        if entry['type'] == 'user':
-            context_parts.append(f"USER: {entry['message']}")
-        else:
-            context_parts.append(f"AI_ASSISTANT: {entry['message']}")
+    
+    # Add conversation history (last 10 messages to keep context manageable)
+    history = conversation_history[sender_email][-10:]
+    for entry in history:
+        role = "USER" if entry['type'] == 'user' else "AI_ASSISTANT"
+        context_parts.append(f"{role}: {entry['message']}")
+    
+    # Add current message
     context_parts.append(f"USER: {current_message}")
+    
     return "\n\n".join(context_parts)
 
-def create_html_body(latest_message, ai_response, is_thread=False, thread_count=1):
+def get_user_email_count(sender_email):
+    """Get the total number of emails this user has sent"""
+    return user_email_counts.get(sender_email, 0)
+
+def create_html_body(latest_message, ai_response, email_count):
+    """Create HTML email body with email count"""
     def safe_html(text): return html.escape(text).replace('\n', '<br>')
-    if is_thread and thread_count > 1:
-        thread_info = f" • {thread_count} exchanges"
-    else:
-        thread_info = " • New conversation"
-    return f"""
-<html>
-<head>
-    <style>
-        body {{ font-family: Arial, sans-serif; background-color: #f9f9f9; margin: 0; padding: 20px; }}
-        .container {{ max-width: 700px; margin: auto; background: white; padding: 20px;
-            border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border: 1px solid #ddd; }}
-        h2 {{ color: #333; font-size: 20px; border-bottom: 2px solid #007bff; padding-bottom: 8px; }}
-        p {{ font-size: 15px; color: #555; line-height: 1.5; }}
-        .response-box {{ background-color: #f0f4ff; border: 1px solid #b3c7ff; padding: 15px;
-            border-radius: 6px; color: #222; font-size: 15px; white-space: pre-wrap; margin-top: 10px; }}
-        .footer {{ margin-top: 30px; font-size: 13px; color: #888; text-align: center; font-style: italic; }}
-    </style>
-</head>
-<body>
+    
+    email_info = f" • Email #{email_count} from you"
+    
+    return f"""<html><head><style>
+    body {{ font-family: Arial, sans-serif; background-color: #f9f9f9; margin: 0; padding: 20px; }}
+    .container {{ max-width: 700px; margin: auto; background: white; padding: 20px;
+        border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border: 1px solid #ddd; }}
+    h2 {{ color: #333; font-size: 20px; border-bottom: 2px solid #007bff; padding-bottom: 8px; }}
+    p {{ font-size: 15px; color: #555; line-height: 1.5; }}
+    .response-box {{ background-color: #f0f4ff; border: 1px solid #b3c7ff; padding: 15px;
+        border-radius: 6px; color: #222; font-size: 15px; white-space: pre-wrap; margin-top: 10px; }}
+    .footer {{ margin-top: 30px; font-size: 13px; color: #888; text-align: center; font-style: italic; }}
+    </style></head><body>
     <div class="container">
-        <h2>You asked:</h2>
-        <p>{safe_html(latest_message)}</p>
-        <h2>AI Response:</h2>
-        <div class="response-box">{safe_html(ai_response)}</div>
-        <div class="footer">AI Assistant • ao1codes{thread_info}</div>
-    </div>
-</body>
-</html>
-"""
+        <h2>You asked:</h2><p>{safe_html(latest_message)}</p>
+        <h2>AI Response:</h2><div class="response-box">{safe_html(ai_response)}</div>
+        <div class="footer">AI Assistant • ao1codes{email_info}</div>
+    </div></body></html>"""
+
+def get_random_model():
+    """Select a random API key and return configured model"""
+    keys = os.getenv("GEMINI_API_KEYS", "").split(",")
+    keys = [k.strip() for k in keys if k.strip()]
+    if not keys:
+        raise ValueError("No API keys found in GEMINI_API_KEYS")
+    
+    random_key = random.choice(keys)
+    if DEBUG:
+        print_info(f"Using API Key: {random_key[:10]}...")
+    
+    configure(api_key=random_key)
+    return GenerativeModel("gemini-1.5-flash")
 
 def main():
-    print_header("ao1codes Email Bot Booting Up")
+    print_header("ao1codes Email Bot v2.0 - Email History Search Mode")
     load_dotenv()
+    
     email_user = os.getenv("EMAIL_ADDRESS")
     email_pass = os.getenv("EMAIL_PASSWORD")
-    api_key = os.getenv("GEMINI_API_KEY")
-    configure(api_key=api_key)
 
     print_info("Connecting to Gmail IMAP...")
     try:
@@ -165,9 +271,7 @@ def main():
         print_error(f"Login failed: {e}")
         return
 
-    model = GenerativeModel("gemini-1.5-flash")
     print_info("Watching inbox every 5 seconds...\nCtrl+C to stop.")
-
     try:
         while True:
             try:
@@ -180,15 +284,17 @@ def main():
             except Exception as e:
                 print_error(f"Reconnecting IMAP: {e}")
                 time.sleep(5)
-                try: imap.logout()
-                except: pass
+                try: 
+                    imap.logout()
+                except: 
+                    pass
                 imap = imaplib.IMAP4_SSL("imap.gmail.com")
                 imap.login(email_user, email_pass)
                 continue
 
             email_nums = messages[0].split()
             if not email_nums:
-                if DEBUG:
+                if DEBUG: 
                     print_info("No new emails. Snoozing...")
             else:
                 print_success(f"Found {len(email_nums)} new email(s)!")
@@ -203,66 +309,80 @@ def main():
                 sender_name, sender_email = email.utils.parseaddr(msg.get("From", ""))
                 subject = msg.get("Subject") or "Your message"
 
+                # Extract email body
                 body, has_attachment = "", False
                 if msg.is_multipart():
                     for part in msg.walk():
-                        content_type = part.get_content_type()
-                        content_disp = str(part.get("Content-Disposition", ""))
-                        if content_type.startswith("image/") or "attachment" in content_disp:
+                        ctype = part.get_content_type()
+                        cdisp = str(part.get("Content-Disposition", ""))
+                        if ctype.startswith("image/") or "attachment" in cdisp:
                             has_attachment = True
-                        elif content_type == "text/plain" and "attachment" not in content_disp:
+                        elif ctype == "text/plain" and "attachment" not in cdisp:
                             payload = part.get_payload(decode=True)
-                            if payload: body = payload.decode(errors="ignore")
+                            if payload: 
+                                body = payload.decode(errors="ignore")
                 else:
                     payload = msg.get_payload(decode=True)
-                    if payload: body = payload.decode(errors="ignore")
+                    if payload: 
+                        body = payload.decode(errors="ignore")
 
-                is_thread = is_likely_reply(subject, body, sender_email)
-                latest_message = extract_latest_message(body)
-
-                if is_thread:
-                    thread_count = len(conversation_history.get(sender_email, [])) // 2 + 1
-                    print_info(f"📧 Continuing conversation (Exchange #{thread_count})")
-                    conversation_context = build_conversation_context(sender_email, latest_message)
+                # Clean the message content
+                clean_message = extract_clean_message(body)
+                
+                # Build conversation history from ALL previous emails
+                email_count = build_conversation_from_email_history(sender_email, imap)
+                
+                # Build conversation context using email history
+                conversation_context = build_conversation_context(sender_email, clean_message)
+                
+                # Create AI prompt with full context
+                if conversation_history.get(sender_email) and len(conversation_history[sender_email]) > 0:
+                    previous_count = len([msg for msg in conversation_history[sender_email] if msg['type'] == 'user'])
+                    print_info(f"📧 Continuing conversation with {sender_email} (Email #{email_count}, {previous_count} previous emails found)")
                     prompt_for_ai = textwrap.dedent(f"""\
-                        You are an AI email assistant continuing an ongoing conversation.
-
-                        CONVERSATION HISTORY:
+                        You are an AI email assistant having an ongoing conversation with this user.
+                        
+                        FULL CONVERSATION HISTORY:
                         {conversation_context}
 
                         INSTRUCTIONS:
-                        - This is a continuation of our conversation
-                        - Reference previous context when relevant
+                        - This is email #{email_count} from this user
+                        - You have {previous_count} previous emails in context
+                        - Reference our previous conversations when relevant
                         - Be natural and conversational
-                        - Remember what we discussed before
+                        - Remember everything we've discussed before
+                        - Maintain continuity in our relationship
 
-                        Please respond to the user's latest message:""")
+                        Please respond to the user's latest message naturally:""")
                 else:
-                    start_new_conversation(sender_email)
-                    thread_count = 1
-                    print_info("📧 New conversation started")
-                    prompt_for_ai = latest_message.strip() if latest_message.strip() else "(No prompt provided)"
+                    print_info(f"📧 Starting new conversation with {sender_email} (Email #1)")
+                    prompt_for_ai = clean_message.strip() or "(No message content provided)"
 
-                first_line = latest_message.splitlines()[0].strip() if latest_message.strip() else "Your message"
-                reply_subject = f"Prompt: {first_line}" if first_line else "Prompt: Your question"
+                # Create reply subject
+                first_line = clean_message.splitlines()[0].strip() if clean_message.strip() else "Your message"
+                reply_subject = f"Re: {first_line[:50]}{'...' if len(first_line) > 50 else ''}"
 
+                # Handle attachments
                 if has_attachment:
-                    print_warning(f"{sender_email} sent an attachment. Skipping AI.")
-                    response = "Thanks for reaching out! We currently don't process emails with attachments. Please resend your message without files."
+                    print_warning(f"{sender_email} sent an attachment. Providing standard response.")
+                    response = "Thanks for reaching out! I currently don't process emails with attachments. Please resend your message without files, and I'll be happy to help!"
                 else:
+                    # Generate AI response
                     print_info(f"Generating AI response for: {first_line[:60]}...")
                     try:
+                        model = get_random_model()
                         response = model.generate_content(prompt_for_ai).text.strip()
-                        print_success("Got response!")
+                        print_success("Generated AI response!")
                     except Exception as e:
-                        print_error(f"AI failed: {e}")
-                        response = "Sorry, I had trouble generating a response to your message. Please try again later."
+                        print_error(f"AI generation failed: {e}")
+                        response = "Sorry, I'm having trouble generating a response right now. Please try again in a moment."
 
+                # Update conversation history (only if no attachment)
                 if not has_attachment:
-                    update_conversation_history(sender_email, latest_message, response)
+                    update_conversation_history(sender_email, clean_message, response)
 
-                html_body = create_html_body(latest_message, response, is_thread, thread_count)
-
+                # Create and send reply
+                html_body = create_html_body(clean_message, response, email_count)
                 reply_msg = MIMEText(html_body, "html")
                 reply_msg["Subject"] = reply_subject
                 reply_msg["From"] = email_user
@@ -273,19 +393,24 @@ def main():
                         smtp.starttls()
                         smtp.login(email_user, email_pass)
                         smtp.send_message(reply_msg)
-                    thread_indicator = f" (Exchange #{thread_count})" if is_thread else " (New)"
-                    print_success(f"Replied to {sender_email}{thread_indicator}")
+                    
+                    print_success(f"Replied to {sender_email} (Email #{email_count})")
+                    imap.select("inbox")
                     imap.store(num, '+FLAGS', '\\Seen')
                 except Exception as e:
-                    print_error(f"Reply failed: {e}")
+                    print_error(f"Failed to send reply: {e}")
 
                 time.sleep(1)
+            
             time.sleep(5)
-
+            
     except KeyboardInterrupt:
         print_info("Shutting down gracefully...")
-        imap.logout()
-        print_success("Logged out. Bye!")
+        try:
+            imap.logout()
+        except:
+            pass
+        print_success("Logged out. Goodbye!")
 
 if __name__ == "__main__":
     main()
