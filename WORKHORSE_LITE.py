@@ -35,7 +35,7 @@ user_email_counts = {}
 def search_all_emails_from_sender(imap, sender_email):
     """Search through ALL emails (sent and received) to build complete conversation history"""
     all_messages = []
-
+    
     # Search in INBOX for emails FROM the sender
     try:
         imap.select("inbox")
@@ -44,7 +44,7 @@ def search_all_emails_from_sender(imap, sender_email):
             inbox_nums = inbox_messages[0].split()
             if DEBUG:
                 print_info(f"Found {len(inbox_nums)} emails in INBOX from {sender_email}")
-
+            
             for num in inbox_nums:
                 try:
                     status, data = imap.fetch(num, "(RFC822)")
@@ -63,10 +63,9 @@ def search_all_emails_from_sender(imap, sender_email):
                     continue
     except Exception as e:
         print_warning(f"Error searching inbox: {e}")
-
+    
     # Search in SENT folder for emails TO the sender (our replies)
     try:
-        # Try different sent folder names
         sent_folders = ['"[Gmail]/Sent Mail"', 'INBOX.Sent', 'Sent', '"Sent Messages"']
         for folder in sent_folders:
             try:
@@ -76,14 +75,13 @@ def search_all_emails_from_sender(imap, sender_email):
                     sent_nums = sent_messages[0].split()
                     if DEBUG:
                         print_info(f"Found {len(sent_nums)} emails in {folder} to {sender_email}")
-
+                    
                     for num in sent_nums:
                         try:
                             status, data = imap.fetch(num, "(RFC822)")
                             if status == "OK":
                                 msg = email.message_from_bytes(data[0][1])
                                 body = extract_email_body(msg)
-                                # Skip if it's an AI response (contains our signature)
                                 if 'ao1codes' not in body.lower() and 'ai assistant' not in body.lower():
                                     clean_msg = extract_clean_message(body)
                                     if clean_msg.strip():
@@ -95,15 +93,14 @@ def search_all_emails_from_sender(imap, sender_email):
                                         })
                         except:
                             continue
-                    break  # Found sent folder, no need to try others
+                    break
             except:
                 continue
     except Exception as e:
         print_warning(f"Error searching sent folders: {e}")
-
-    # Sort by date (rough sorting by date string)
+    
     all_messages.sort(key=lambda x: x['date'])
-
+    
     return all_messages
 
 def extract_email_body(msg):
@@ -125,106 +122,94 @@ def extract_email_body(msg):
     return body
 
 def build_conversation_from_email_history(sender_email, imap, current_message):
+    """Build conversation history by searching through all emails from this sender"""
     if DEBUG:
         print_info(f"Building conversation history for {sender_email}...")
-
+    
     all_messages = search_all_emails_from_sender(imap, sender_email)
 
-    if all_messages and all_messages[-1]['message'].strip() == current_message.strip():
-        all_messages.pop()
-
+    # Remove duplicates of current message
+    all_messages = [msg for msg in all_messages if extract_clean_message(msg['message']) != extract_clean_message(current_message)]
+    
     if not all_messages:
         print_info("No previous emails found")
-        return 1  # First email
-
+        return 0
+    
     user_email_count = len([msg for msg in all_messages if msg['type'] == 'user'])
-
+    
     conversation_history[sender_email] = all_messages[-20:]
     user_email_counts[sender_email] = user_email_count
-
+    
     if DEBUG:
         print_success(f"Found {user_email_count} previous emails from {sender_email}")
         print_success(f"Loaded {len(conversation_history[sender_email])} messages into context")
-
+    
     return user_email_count
 
 def extract_clean_message(body):
-    """Extract the main message content, removing quoted text and signatures"""
     lines = body.split('\n')
     clean_lines = []
-
+    
     for line in lines:
         stripped = line.strip()
-        # Skip quoted content, signatures, and HTML
-        if (stripped.startswith('>') or
+        if (stripped.startswith('>') or 
             'wrote:' in stripped.lower() or
             'original message' in stripped.lower() or
             'ai assistant' in stripped.lower() or
             'ao1codes' in stripped.lower() or
             '<html>' in stripped.lower() or
-            stripped.startswith('--') or  # Common signature delimiter
+            stripped.startswith('--') or
             'sent from my' in stripped.lower()):
             break
         clean_lines.append(line)
-
+    
     clean_message = '\n'.join(clean_lines).strip()
     return clean_message if clean_message else body.strip()
 
 def update_conversation_history(sender_email, user_message, ai_response):
-    """Add to conversation history and increment email count"""
     if sender_email not in conversation_history:
         conversation_history[sender_email] = []
     if sender_email not in user_email_counts:
         user_email_counts[sender_email] = 0
-
-    # Increment email count for this user
-    user_email_counts[sender_email] += 1
-
-    # Add to conversation history
+        
     conversation_history[sender_email].append({
-        'type': 'user',
-        'message': user_message,
+        'type': 'user', 
+        'message': user_message, 
         'date': time.strftime('%a, %d %b %Y %H:%M:%S'),
         'email_number': user_email_counts[sender_email]
     })
     conversation_history[sender_email].append({
-        'type': 'ai',
-        'message': ai_response,
+        'type': 'ai', 
+        'message': ai_response, 
         'date': time.strftime('%a, %d %b %Y %H:%M:%S')
     })
-
-    # Keep last 30 messages (15 exchanges) to manage memory
+    
     if len(conversation_history[sender_email]) > 30:
         conversation_history[sender_email] = conversation_history[sender_email][-30:]
 
 def build_conversation_context(sender_email, current_message):
-    """Build full conversation context for the AI"""
     if sender_email not in conversation_history or not conversation_history[sender_email]:
         return current_message
-
+    
     context_parts = []
-
-    # Add conversation history (last 10 messages to keep context manageable)
+    
     history = conversation_history[sender_email][-10:]
     for entry in history:
         role = "USER" if entry['type'] == 'user' else "AI_ASSISTANT"
         context_parts.append(f"{role}: {entry['message']}")
-
-    # Add current message
+    
     context_parts.append(f"USER: {current_message}")
-
+    
     return "\n\n".join(context_parts)
 
 def get_user_email_count(sender_email):
-    """Get the total number of emails this user has sent"""
     return user_email_counts.get(sender_email, 0)
 
 def create_html_body(latest_message, ai_response, email_count):
-    """Create HTML email body with email count"""
     def safe_html(text): return html.escape(text).replace('\n', '<br>')
-
+    
     email_info = f" • Email #{email_count} from you"
-
+    
     return f"""<html><head><style>
     body {{ font-family: Arial, sans-serif; background-color: #f9f9f9; margin: 0; padding: 20px; }}
     .container {{ max-width: 700px; margin: auto; background: white; padding: 20px;
@@ -242,23 +227,22 @@ def create_html_body(latest_message, ai_response, email_count):
     </div></body></html>"""
 
 def get_random_model():
-    """Select a random API key and return configured model"""
     keys = os.getenv("GEMINI_API_KEYS", "").split(",")
     keys = [k.strip() for k in keys if k.strip()]
     if not keys:
         raise ValueError("No API keys found in GEMINI_API_KEYS")
-
+    
     random_key = random.choice(keys)
     if DEBUG:
         print_info(f"Using API Key: {random_key[:10]}...")
-
+    
     configure(api_key=random_key)
     return GenerativeModel("gemini-1.5-flash")
 
 def main():
     print_header("ao1codes Email Bot v2.0 - Email History Search Mode")
     load_dotenv()
-
+    
     email_user = os.getenv("EMAIL_ADDRESS")
     email_pass = os.getenv("EMAIL_PASSWORD")
 
@@ -284,9 +268,9 @@ def main():
             except Exception as e:
                 print_error(f"Reconnecting IMAP: {e}")
                 time.sleep(5)
-                try:
+                try: 
                     imap.logout()
-                except:
+                except: 
                     pass
                 imap = imaplib.IMAP4_SSL("imap.gmail.com")
                 imap.login(email_user, email_pass)
@@ -294,7 +278,7 @@ def main():
 
             email_nums = messages[0].split()
             if not email_nums:
-                if DEBUG:
+                if DEBUG: 
                     print_info("No new emails. Snoozing...")
             else:
                 print_success(f"Found {len(email_nums)} new email(s)!")
@@ -309,7 +293,6 @@ def main():
                 sender_name, sender_email = email.utils.parseaddr(msg.get("From", ""))
                 subject = msg.get("Subject") or "Your message"
 
-                # Extract email body
                 body, has_attachment = "", False
                 if msg.is_multipart():
                     for part in msg.walk():
@@ -319,55 +302,50 @@ def main():
                             has_attachment = True
                         elif ctype == "text/plain" and "attachment" not in cdisp:
                             payload = part.get_payload(decode=True)
-                            if payload:
+                            if payload: 
                                 body = payload.decode(errors="ignore")
                 else:
                     payload = msg.get_payload(decode=True)
-                    if payload:
+                    if payload: 
                         body = payload.decode(errors="ignore")
 
-                # Clean the message content
                 clean_message = extract_clean_message(body)
-
-                # Build conversation history from ALL previous emails
                 email_count = build_conversation_from_email_history(sender_email, imap, clean_message)
+                # If no previous emails found, start at 1, else increment
+                email_count = email_count if email_count > 0 else 0
+                email_count += 1
 
-                # Build conversation context using email history
                 conversation_context = build_conversation_context(sender_email, clean_message)
 
-                # Create AI prompt with full context
-                if conversation_history.get(sender_email) and len(conversation_history[sender_email]) > 0:
-                    previous_count = len([msg for msg in conversation_history[sender_email] if msg['type'] == 'user'])
+                previous_count = len([msg for msg in conversation_history.get(sender_email, []) if msg['type'] == 'user'])
+                if previous_count > 0:
                     print_info(f"📧 Continuing conversation with {sender_email} (Email #{email_count}, {previous_count} previous emails found)")
                     prompt_for_ai = textwrap.dedent(f"""\
-                        You are an AI email assistant having an ongoing conversation with this user.
-
+                        You're an AI assistant replying casually and directly to this user.
+                        
                         FULL CONVERSATION HISTORY:
                         {conversation_context}
 
-                        INSTRUCTIONS:
-                        - This is email #{email_count} from this user
+                        GUIDELINES:
+                        - This is email #{email_count} from the user
                         - You have {previous_count} previous emails in context
-                        - Reference our previous conversations when relevant
-                        - Be natural and conversational
-                        - Remember everything we've discussed before
-                        - Maintain continuity in our relationship
+                        - Respond casually and directly
+                        - Do NOT include greetings like "Dear..." or mention the email subject
+                        - Answer their question or request head-on, no stalling or overformal tone
+                        - If they gave a task or command, just do it
 
-                        Please respond to the user's latest message naturally:""")
+                        Now respond to their latest message:""")
                 else:
                     print_info(f"📧 Starting new conversation with {sender_email} (Email #1)")
                     prompt_for_ai = clean_message.strip() or "(No message content provided)"
 
-                # Create reply subject
                 first_line = clean_message.splitlines()[0].strip() if clean_message.strip() else "Your message"
                 reply_subject = f"Re: {first_line[:50]}{'...' if len(first_line) > 50 else ''}"
 
-                # Handle attachments
                 if has_attachment:
                     print_warning(f"{sender_email} sent an attachment. Providing standard response.")
                     response = "Thanks for reaching out! I currently don't process emails with attachments. Please resend your message without files, and I'll be happy to help!"
                 else:
-                    # Generate AI response
                     print_info(f"Generating AI response for: {first_line[:60]}...")
                     try:
                         model = get_random_model()
@@ -377,11 +355,9 @@ def main():
                         print_error(f"AI generation failed: {e}")
                         response = "Sorry, I'm having trouble generating a response right now. Please try again in a moment."
 
-                # Update conversation history (only if no attachment)
                 if not has_attachment:
                     update_conversation_history(sender_email, clean_message, response)
 
-                # Create and send reply
                 html_body = create_html_body(clean_message, response, email_count)
                 reply_msg = MIMEText(html_body, "html")
                 reply_msg["Subject"] = reply_subject
@@ -393,7 +369,7 @@ def main():
                         smtp.starttls()
                         smtp.login(email_user, email_pass)
                         smtp.send_message(reply_msg)
-
+                    
                     print_success(f"Replied to {sender_email} (Email #{email_count})")
                     imap.select("inbox")
                     imap.store(num, '+FLAGS', '\\Seen')
@@ -401,9 +377,9 @@ def main():
                     print_error(f"Failed to send reply: {e}")
 
                 time.sleep(1)
-
+            
             time.sleep(5)
-
+            
     except KeyboardInterrupt:
         print_info("Shutting down gracefully...")
         try:
