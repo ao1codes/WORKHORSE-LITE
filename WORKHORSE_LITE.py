@@ -239,23 +239,29 @@ def get_random_model():
     configure(api_key=random_key)
     return GenerativeModel("gemini-1.5-flash")
 
+def connect_imap(email_user, email_pass):
+    while True:
+        try:
+            imap = imaplib.IMAP4_SSL("imap.gmail.com")
+            imap.login(email_user, email_pass)
+            print_success("Logged in to Gmail IMAP!")
+            return imap
+        except Exception as e:
+            print_error(f"Failed to connect/login to IMAP: {e}")
+            print_info("Retrying in 10 seconds...")
+            time.sleep(10)
+
 def main():
     print_header("ao1codes Email Bot v2.0 - Email History Search Mode")
     load_dotenv()
-    
+
     email_user = os.getenv("EMAIL_ADDRESS")
     email_pass = os.getenv("EMAIL_PASSWORD")
 
-    print_info("Connecting to Gmail IMAP...")
-    try:
-        imap = imaplib.IMAP4_SSL("imap.gmail.com")
-        imap.login(email_user, email_pass)
-        print_success("Logged in to Gmail!")
-    except Exception as e:
-        print_error(f"Login failed: {e}")
-        return
-
+    imap = connect_imap(email_user, email_pass)
+    
     print_info("Watching inbox every 5 seconds...\nCtrl+C to stop.")
+
     try:
         while True:
             try:
@@ -265,121 +271,123 @@ def main():
                     print_error("Search failed.")
                     time.sleep(5)
                     continue
-            except Exception as e:
-                print_error(f"Reconnecting IMAP: {e}")
-                time.sleep(5)
-                try: 
-                    imap.logout()
-                except: 
-                    pass
-                imap = imaplib.IMAP4_SSL("imap.gmail.com")
-                imap.login(email_user, email_pass)
-                continue
 
-            email_nums = messages[0].split()
-            if not email_nums:
-                if DEBUG: 
-                    print_info("No new emails. Snoozing...")
-            else:
-                print_success(f"Found {len(email_nums)} new email(s)!")
-
-            for num in email_nums:
-                status, data = imap.fetch(num, "(RFC822)")
-                if status != "OK":
-                    print_warning(f"Failed to fetch #{num.decode()}")
-                    continue
-
-                msg = email.message_from_bytes(data[0][1])
-                sender_name, sender_email = email.utils.parseaddr(msg.get("From", ""))
-                subject = msg.get("Subject") or "Your message"
-
-                body, has_attachment = "", False
-                if msg.is_multipart():
-                    for part in msg.walk():
-                        ctype = part.get_content_type()
-                        cdisp = str(part.get("Content-Disposition", ""))
-                        if ctype.startswith("image/") or "attachment" in cdisp:
-                            has_attachment = True
-                        elif ctype == "text/plain" and "attachment" not in cdisp:
-                            payload = part.get_payload(decode=True)
-                            if payload: 
-                                body = payload.decode(errors="ignore")
+                email_nums = messages[0].split()
+                if not email_nums:
+                    if DEBUG:
+                        print_info("No new emails. Snoozing...")
                 else:
-                    payload = msg.get_payload(decode=True)
-                    if payload: 
-                        body = payload.decode(errors="ignore")
+                    print_success(f"Found {len(email_nums)} new email(s)!")
 
-                clean_message = extract_clean_message(body)
-                email_count = build_conversation_from_email_history(sender_email, imap, clean_message)
-                # If no previous emails found, start at 1, else increment
-                email_count = email_count if email_count > 0 else 0
-                email_count += 1
+                for num in email_nums:
+                    status, data = imap.fetch(num, "(RFC822)")
+                    if status != "OK":
+                        print_warning(f"Failed to fetch #{num.decode()}")
+                        continue
 
-                conversation_context = build_conversation_context(sender_email, clean_message)
+                    msg = email.message_from_bytes(data[0][1])
+                    sender_name, sender_email = email.utils.parseaddr(msg.get("From", ""))
+                    subject = msg.get("Subject") or "Your message"
 
-                previous_count = len([msg for msg in conversation_history.get(sender_email, []) if msg['type'] == 'user'])
-                if previous_count > 0:
-                    print_info(f"📧 Continuing conversation with {sender_email} (Email #{email_count}, {previous_count} previous emails found)")
-                    prompt_for_ai = textwrap.dedent(f"""\
-                        You're an AI assistant replying casually and directly to this user.
-                        
-                        FULL CONVERSATION HISTORY:
-                        {conversation_context}
+                    body, has_attachment = "", False
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            ctype = part.get_content_type()
+                            cdisp = str(part.get("Content-Disposition", ""))
+                            if ctype.startswith("image/") or "attachment" in cdisp:
+                                has_attachment = True
+                            elif ctype == "text/plain" and "attachment" not in cdisp:
+                                payload = part.get_payload(decode=True)
+                                if payload:
+                                    body = payload.decode(errors="ignore")
+                    else:
+                        payload = msg.get_payload(decode=True)
+                        if payload:
+                            body = payload.decode(errors="ignore")
 
-                        GUIDELINES:
-                        - This is email #{email_count} from the user
-                        - You have {previous_count} previous emails in context
-                        - Respond casually and directly
-                        - Do NOT include greetings like "Dear..." or mention the email subject
-                        - Answer their question or request head-on, no stalling or overformal tone
-                        - If they gave a task or command, just do it
+                    clean_message = extract_clean_message(body)
+                    email_count = build_conversation_from_email_history(sender_email, imap, clean_message)
+                    # If no previous emails found, start at 1, else increment
+                    email_count = email_count if email_count > 0 else 0
+                    email_count += 1
 
-                        Now respond to their latest message:""")
-                else:
-                    print_info(f"📧 Starting new conversation with {sender_email} (Email #1)")
-                    prompt_for_ai = clean_message.strip() or "(No message content provided)"
+                    conversation_context = build_conversation_context(sender_email, clean_message)
 
-                first_line = clean_message.splitlines()[0].strip() if clean_message.strip() else "Your message"
-                reply_subject = f"Re: {first_line[:50]}{'...' if len(first_line) > 50 else ''}"
+                    previous_count = len([msg for msg in conversation_history.get(sender_email, []) if msg['type'] == 'user'])
+                    if previous_count > 0:
+                        print_info(f"📧 Continuing conversation with {sender_email} (Email #{email_count}, {previous_count} previous emails found)")
+                        prompt_for_ai = textwrap.dedent(f"""\ 
+                            You're an AI assistant replying casually and directly to this user.
+                            
+                            FULL CONVERSATION HISTORY:
+                            {conversation_context}
 
-                if has_attachment:
-                    print_warning(f"{sender_email} sent an attachment. Providing standard response.")
-                    response = "Thanks for reaching out! I currently don't process emails with attachments. Please resend your message without files, and I'll be happy to help!"
-                else:
-                    print_info(f"Generating AI response for: {first_line[:60]}...")
+                            GUIDELINES:
+                            - This is email #{email_count} from the user
+                            - You have {previous_count} previous emails in context
+                            - Respond casually and directly
+                            - Do NOT include greetings like "Dear..." or mention the email subject
+                            - Answer their question or request head-on, no stalling or overformal tone
+                            - If they gave a task or command, just do it
+
+                            Now respond to their latest message:""")
+                    else:
+                        print_info(f"📧 Starting new conversation with {sender_email} (Email #1)")
+                        prompt_for_ai = clean_message.strip() or "(No message content provided)"
+
+                    first_line = clean_message.splitlines()[0].strip() if clean_message.strip() else "Your message"
+                    reply_subject = f"Re: {first_line[:50]}{'...' if len(first_line) > 50 else ''}"
+
+                    if has_attachment:
+                        print_warning(f"{sender_email} sent an attachment. Providing standard response.")
+                        response = "Thanks for reaching out! I currently don't process emails with attachments. Please resend your message without files, and I'll be happy to help!"
+                    else:
+                        print_info(f"Generating AI response for: {first_line[:60]}...")
+                        try:
+                            model = get_random_model()
+                            response = model.generate_content(prompt_for_ai).text.strip()
+                            print_success("Generated AI response!")
+                        except Exception as e:
+                            print_error(f"AI generation failed: {e}")
+                            response = "Sorry, I'm having trouble generating a response right now. Please try again in a moment."
+
+                    if not has_attachment:
+                        update_conversation_history(sender_email, clean_message, response)
+
+                    html_body = create_html_body(clean_message, response, email_count)
+                    reply_msg = MIMEText(html_body, "html")
+                    reply_msg["Subject"] = reply_subject
+                    reply_msg["From"] = email_user
+                    reply_msg["To"] = sender_email
+
                     try:
-                        model = get_random_model()
-                        response = model.generate_content(prompt_for_ai).text.strip()
-                        print_success("Generated AI response!")
+                        with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+                            smtp.starttls()
+                            smtp.login(email_user, email_pass)
+                            smtp.send_message(reply_msg)
+                        
+                        print_success(f"Replied to {sender_email} (Email #{email_count})")
+                        imap.select("inbox")
+                        imap.store(num, '+FLAGS', '\\Seen')
                     except Exception as e:
-                        print_error(f"AI generation failed: {e}")
-                        response = "Sorry, I'm having trouble generating a response right now. Please try again in a moment."
+                        print_error(f"Failed to send reply: {e}")
 
-                if not has_attachment:
-                    update_conversation_history(sender_email, clean_message, response)
+                    time.sleep(1)
+                
+                time.sleep(5)
 
-                html_body = create_html_body(clean_message, response, email_count)
-                reply_msg = MIMEText(html_body, "html")
-                reply_msg["Subject"] = reply_subject
-                reply_msg["From"] = email_user
-                reply_msg["To"] = sender_email
-
+            except imaplib.IMAP4.abort as e:
+                print_warning(f"IMAP connection aborted: {e}. Reconnecting...")
                 try:
-                    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
-                        smtp.starttls()
-                        smtp.login(email_user, email_pass)
-                        smtp.send_message(reply_msg)
-                    
-                    print_success(f"Replied to {sender_email} (Email #{email_count})")
-                    imap.select("inbox")
-                    imap.store(num, '+FLAGS', '\\Seen')
-                except Exception as e:
-                    print_error(f"Failed to send reply: {e}")
+                    imap.logout()
+                except:
+                    pass
+                imap = connect_imap(email_user, email_pass)
 
-                time.sleep(1)
-            
-            time.sleep(5)
-            
+            except Exception as e:
+                print_error(f"Unexpected error: {e}")
+                time.sleep(5)
+                
     except KeyboardInterrupt:
         print_info("Shutting down gracefully...")
         try:
