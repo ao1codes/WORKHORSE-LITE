@@ -316,7 +316,7 @@ def main():
                     previous_count = len([msg for msg in conversation_history.get(sender_email, []) if msg['type'] == 'user'])
                     if previous_count > 0:
                         print_info(f"📧 Continuing conversation with {sender_email} (Email #{email_count}, {previous_count} previous emails found)")
-                        prompt_for_ai = textwrap.dedent(f"""\ 
+                        prompt_for_ai = textwrap.dedent(f"""
                             You're an AI assistant replying casually and directly to this user.
                             
                             FULL CONVERSATION HISTORY:
