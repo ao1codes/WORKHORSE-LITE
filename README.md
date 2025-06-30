@@ -6,19 +6,19 @@ MailMind is an email-based AI responder. Just send an email to `ao1codes.ai@gmai
 
 ---
 
-## ✨ Features
+## Features
 
-- 📥 Auto-checks Gmail inbox for new emails
-- 🤖 AI-generated responses using Gemini 1.5 Flash
-- 💬 Full HTML-formatted replies with original message included
-- 📷 Skips image/file attachments and responds accordingly
-- 🔁 Self-reconnecting IMAP loop with delay handling
-- 🔐 Uses `.env` for secure credential loading
-- 💤 Sleep cycles to avoid Gmail rate limits
-- 🔄 Supports full conversation history across all emails
+-  Auto-checks Gmail inbox for new emails
+-  AI-generated responses using Gemini 1.5 Flash
+-  Full HTML-formatted replies with original message included
+-  Skips image/file attachments and responds accordingly
+-  Self-reconnecting IMAP loop with delay handling
+-  Uses `.env` for secure credential loading
+-  Sleep cycles to avoid Gmail rate limits
+-  Supports full conversation history across all emails
 ---
 
-## 📦 Installation
+## Installation
 
 1. Clone this repository  
    ```bash
@@ -40,7 +40,7 @@ MailMind is an email-based AI responder. Just send an email to `ao1codes.ai@gmai
 
 ---
 
-## 🛠️ Running the Bot
+## Running the Bot
 
 ```bash
 python workhorse-lite.py
@@ -50,14 +50,14 @@ The bot will start watching your Gmail inbox and reply to new, plain-text emails
 
 ---
 
-## 🚫 Limitations
+## Limitations
 
 - Attachments are ignored — users are notified not to send files.
 - This is a personal-use tool; for large-scale deployment, consider API rate limits and auth security.
 
 ---
 
-## 🌐 Live Demo
+## Live Demo
 
 Want to try it? Just email:
 
@@ -68,7 +68,7 @@ ao1codes.ai@gmail.com
 No signup. No dashboard. Just email an AI and get a reply.
 
 
-## 📝 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
