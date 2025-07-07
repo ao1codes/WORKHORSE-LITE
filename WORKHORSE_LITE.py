@@ -33,10 +33,10 @@ conversation_history = {}
 user_email_counts = {}
 
 def search_all_emails_from_sender(imap, sender_email):
-    """Search through ALL emails (sent and received) to build complete conversation history"""
+    # Search through ALL emails (sent and received) to build complete conversation history
     all_messages = []
     
-    # Search in INBOX for emails FROM the sender
+    # Search in THE INBOX for emails FROM the sender
     try:
         imap.select("inbox")
         status, inbox_messages = imap.search(None, f'FROM "{sender_email}"')
@@ -104,7 +104,7 @@ def search_all_emails_from_sender(imap, sender_email):
     return all_messages
 
 def extract_email_body(msg):
-    """Extract body text from email message"""
+    # Extract body text from email message
     body = ""
     if msg.is_multipart():
         for part in msg.walk():
@@ -122,7 +122,7 @@ def extract_email_body(msg):
     return body
 
 def build_conversation_from_email_history(sender_email, imap, current_message):
-    """Build conversation history by searching through all emails from this sender"""
+    # Build conversation history by searching through all emails from this sender
     if DEBUG:
         print_info(f"Building conversation history for {sender_email}...")
     
