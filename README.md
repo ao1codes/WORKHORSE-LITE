@@ -67,9 +67,4 @@ ao1codes.ai@gmail.com
 
 No signup. No dashboard. Just email an AI and get a reply.
 
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 ---
