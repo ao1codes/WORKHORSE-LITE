@@ -2,7 +2,7 @@
 
 **Email an AI. Get smart replies. No login needed.**
 
-An AI email responder that replies to Gmail messages using Google Gemini. Works without a login or app—just send an email to get a response.
+An AI email responder that replies to Gmail messages using Google Gemini. Works without a login or app. Just send an email to get a response.
 
 ---
 
