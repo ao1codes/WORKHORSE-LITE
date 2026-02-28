@@ -1,2 +1,2 @@
 python-dotenv
-google-generativeai
+google.generativeai
